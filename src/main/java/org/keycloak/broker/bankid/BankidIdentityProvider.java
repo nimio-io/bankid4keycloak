@@ -15,6 +15,7 @@ import org.keycloak.models.FederatedIdentityModel;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.RealmModel;
 import org.keycloak.models.UserModel;
+import org.keycloak.models.UserSessionModel;
 
 public class BankidIdentityProvider extends AbstractIdentityProvider<BankidIdentityProviderConfig> {
 
@@ -49,6 +50,12 @@ public class BankidIdentityProvider extends AbstractIdentityProvider<BankidIdent
 	@Override
 	public Response retrieveToken(KeycloakSession session, FederatedIdentityModel identity) {
 		return Response.ok(identity.getToken()).build();
+	}
+
+	@Override
+	public Response retrieveToken(KeycloakSession session, FederatedIdentityModel identity,
+			UserSessionModel userSession, UserModel user) {
+		return retrieveToken(session, identity);
 	}
 
 	@Override
