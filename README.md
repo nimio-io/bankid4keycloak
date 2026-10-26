@@ -26,25 +26,17 @@ cp target/bankid4keycloak-1.0.0-SNAPSHOT.jar <KEYCLOAK_HOME>/providers
 <KEYCLOAK_HOME>/bin/kc.[sh|bat] build
 ```
 
-## Client certificate and truststore
-In order to access the BankID API a client certificate and a truststore is required, both in PKCS12 format.
+## Client certificate
+In order to access the BankID API a client certificate in PKCS12 format is required. It is configured as base64 (see *Keystore (base64)* below), so it can come straight from a secret store instead of a file on the Keycloak host.
 
-
-### Client certificate
 To use BankID in production a valid contract is required, please contact one of the banks acting as resellers for [more information](https://www.bankid.com/en/utvecklare/guider/skapa-fp-certifikat).
 
 A certificate for the BankID test environment can be downloaded using the following [page](https://www.bankid.com/en/utvecklare/test)
 
 The password for the PKCS12 container and the private key is: qwerty123
 
-### Truststore
-The CA Certificate is available in the official [Integration guide, API](https://www.bankid.com/en/utvecklare/guider/teknisk-integrationsguide) under the [Environments](https://www.bankid.com/en/utvecklare/guider/teknisk-integrationsguide/miljoer) section. 
-
-
-*example of how to create a PKCS12 truststore from a pem formated file*
-
-`keytool -importcert -file Test_BankID_SSL_Root_CA_v1_Test.pem -alias "BankID Test CA" -trustcacerts -storetype pkcs12 -keystore truststore.p12`
-
+## Server CA
+The BankID root CAs for production (`BankID SSL Root CA v1`) and test (`Test BankID SSL Root CA v1 Test`) ship in the jar under `bankid-ca/`. The provider trusts the one that matches the host of the API base URL and fails on any other host, so there is no truststore to configure.
 
 ## Configure
 
@@ -67,32 +59,22 @@ At the time of writing they are
  - Prod --> https://appapi2.bankid.com
  - Test --> https://appapi2.test.bankid.com
 
-### Keystore file
-Full path to the keystore file.
+### Keystore (base64)
+The PKCS12 keystore, base64 encoded. Line breaks are ignored.
 
-*example*: `/tls/keystore.p12`
+Keycloak returns this value, and the two passwords below, in clear text to anyone who can view identity providers or export the realm. Use [vault](https://www.keycloak.org/server/vault) references for all three, so the config holds only the reference, e.g. with `--vault=file` and a file `<realm>_bankid-client-cert` holding the output of `base64 -i keystore.p12`:
+
+*example*: `${vault.bankid-client-cert}`
 
 ### Keystore password
 
-Password for the PKCS12 container.
+Password for the PKCS12 container. Supports vault references.
 
-*example*: `qwerty123`
+*example*: `${vault.bankid-client-cert-passphrase}`
 
 ### Password for the private key
 
 The private key inside the PKCS12 container is also encrypted.
-
-*example*: `qwerty123`
-
-### Truststore file
-
-Full path to the truststore file.
-
-*example*: `/tls/truststore.p12`
-
-### Truststore password
-
-Password for the PKCS12 container.  
 
 *example*: `qwerty123`
 

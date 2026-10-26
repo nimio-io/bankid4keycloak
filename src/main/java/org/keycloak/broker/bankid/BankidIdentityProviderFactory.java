@@ -1,5 +1,9 @@
 package org.keycloak.broker.bankid;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -27,6 +31,7 @@ public class BankidIdentityProviderFactory extends AbstractIdentityProviderFacto
 	@Override
 	public BankidIdentityProvider create(KeycloakSession session, IdentityProviderModel model) {
 		BankidIdentityProviderConfig config = new BankidIdentityProviderConfig(model);
+		config.resolveSecrets(session.vault());
 		SimpleBankidClient client = CLIENTS.computeIfAbsent(clientKey(config),
 				key -> new SimpleBankidClient(buildBankidHttpClient(config), config.getApiUrl()));
 		return new BankidIdentityProvider(session, config, client);
@@ -48,19 +53,13 @@ public class BankidIdentityProviderFactory extends AbstractIdentityProviderFacto
 				.property().name(BankidIdentityProviderConfig.BANKID_APIURL_PROPERTY_NAME).label("BankID API base URL").helpText("The base URL for the BankID API. Without the trailing slash. Normally https://appapi2.bankid.com")
                 .type(ProviderConfigProperty.STRING_TYPE).add()
 
-				.property().name(BankidIdentityProviderConfig.BANKID_KEYSTORE_FILE_PROPERTY_NAME).label("Keystore file").helpText("Full path to the keystore file, that holds the client certificate, including filename i.e. /path/to/file/myfile.p12")
-                .type(ProviderConfigProperty.STRING_TYPE).add()
+				.property().name(BankidIdentityProviderConfig.BANKID_KEYSTORE_BASE64_PROPERTY_NAME).label("Keystore (base64)").helpText("The PKCS12 keystore that holds the client certificate, base64 encoded. Use a vault reference, i.e. ${vault.bankid-client-cert}, so the keystore is not stored in the identity provider config.")
+                .type(ProviderConfigProperty.PASSWORD).add()
 				
 				.property().name(BankidIdentityProviderConfig.BANKID_KEYSTORE_PASSWORD_PROPERTY_NAME).label("Keystore password").helpText("The password for the keystore.")
                 .type(ProviderConfigProperty.PASSWORD).add()
 				
 				.property().name(BankidIdentityProviderConfig.BANKID_PRIVATEKEY_PASSWORD_PROPERTY_NAME).label("Password for the private key").helpText("Password for the private key.")
-                .type(ProviderConfigProperty.PASSWORD).add()
-				
-				.property().name(BankidIdentityProviderConfig.BANKID_TRUSTSTORE_FILE_PROPERTY_NAME).label("Truststore file").helpText("Full path to the truststore file, that holds the CA for the server certificate, including filename i.e. /path/to/file/bankid-truststore.p12")
-                .type(ProviderConfigProperty.STRING_TYPE).add()
-				
-				.property().name(BankidIdentityProviderConfig.BANKID_TRUSTSTORE_PASSWORD_PROPERTY_NAME).label("Truststore password").helpText("The password for the truststore.")
                 .type(ProviderConfigProperty.PASSWORD).add()
 				
 				.property().name(BankidIdentityProviderConfig.BANKID_REQUIRE_NIN).label("Require Personal Number").helpText("Require the user to provide their Personal Number before logging in.")
@@ -86,10 +85,24 @@ public class BankidIdentityProviderFactory extends AbstractIdentityProviderFacto
 			.build();
 	}
 
-	private String clientKey(BankidIdentityProviderConfig config) {
+	// The keystore and its passwords are part of the key (hashed, never in
+	// clear) so a rotated certificate or a changed password builds a new HTTP
+	// client on the next request; a wrong new password then fails right away
+	// instead of hiding behind the cached client until a restart.
+	static String clientKey(BankidIdentityProviderConfig config) {
 		String alias = config.getAlias() != null ? config.getAlias() : "";
 		String apiUrl = config.getApiUrl() != null ? config.getApiUrl() : "";
-		return alias + "@" + apiUrl;
+		return alias + "@" + apiUrl + "#" + sha256(String.join("\0",
+				config.getKeyStoreBase64(), config.getKeyStorePassword(), config.getPrivateKeyPassword()));
+	}
+
+	private static String sha256(String value) {
+		try {
+			return HexFormat.of().formatHex(
+					MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8)));
+		} catch (NoSuchAlgorithmException e) {
+			throw new IllegalStateException(e);
+		}
 	}
 
 	private HttpClient buildBankidHttpClient(BankidIdentityProviderConfig config) {
