@@ -5,7 +5,7 @@
 	<modelVersion>4.0.0</modelVersion>
 	<groupId>sweid4keycloak</groupId>
 	<artifactId>bankid4keycloak</artifactId>
-	<version>26.0.0-SNAPSHOT</version>
+	<version>26.1.0</version>
 	<packaging>jar</packaging>
 	<properties>
 		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
@@ -15,6 +15,7 @@
 		<keycloak.version>26.6.2</keycloak.version>
 		<google.zxing.version>3.5.3</google.zxing.version>
 		<protostream.version>6.0.6</protostream.version>
+		<junit.version>5.11.4</junit.version>
 	</properties>
 	<licenses>
 		<license>
@@ -90,6 +91,12 @@
 			<version>${protostream.version}</version>
 			<scope>provided</scope>
 		</dependency>
+		<dependency>
+			<groupId>org.junit.jupiter</groupId>
+			<artifactId>junit-jupiter</artifactId>
+			<version>${junit.version}</version>
+			<scope>test</scope>
+		</dependency>
 	</dependencies>
 	<build>
 		<plugins>
@@ -108,6 +115,11 @@
 						</path>
 					</annotationProcessorPaths>
 				</configuration>
+			</plugin>
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-surefire-plugin</artifactId>
+				<version>3.5.2</version>
 			</plugin>
 			<plugin>
 				<groupId>org.apache.maven.plugins</groupId>

@@ -1,8 +1,14 @@
 package org.keycloak.broker.bankid;
 
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.net.URI;
 import java.security.KeyStore;
+import java.security.cert.CertificateFactory;
+import java.util.Base64;
+import java.util.Map;
 
-import org.keycloak.common.util.KeystoreUtil;
 import org.keycloak.models.IdentityProviderModel;
 
 public class BankidIdentityProviderConfig extends IdentityProviderModel {
@@ -12,16 +18,21 @@ public class BankidIdentityProviderConfig extends IdentityProviderModel {
 	private static final long serialVersionUID = 3849007589404817838L;
 
 	public static final String BANKID_APIURL_PROPERTY_NAME = "bankid_apiurl";
-	public static final String BANKID_KEYSTORE_FILE_PROPERTY_NAME = "bankid_keystore_file";
+	public static final String BANKID_KEYSTORE_BASE64_PROPERTY_NAME = "bankid_keystore_base64";
 	public static final String BANKID_KEYSTORE_PASSWORD_PROPERTY_NAME = "bankid_keystore_password";
-	public static final String BANKID_TRUSTSTORE_FILE_PROPERTY_NAME = "bankid_truststore_file";
-	public static final String BANKID_TRUSTSTORE_PASSWORD_PROPERTY_NAME = "bankid_truststore_password";
 	public static final String BANKID_PRIVATEKEY_PASSWORD_PROPERTY_NAME = "bankid_privatekey_password";
 	public static final String BANKID_REQUIRE_NIN = "bankid_require_nin";
 	public static final String BANKID_SHOW_QR_CODE = "bankid_show_qr_code";
 	public static final String BANKID_SAVE_NIN_HASH = "bankid_save_nin_hash";
 	public static final String BANKID_CONNECTION_POOL_SIZE = "bankid_connection_pool_size";
 	public static final String BANKID_MAX_POOLED_PER_ROUTE = "bankid_max_pooled_per_route";
+
+	// The BankID server certificates are issued by these roots, one per
+	// environment. They are public, so they ship in the jar and are picked by the
+	// API host instead of being configured.
+	private static final Map<String, String> ROOT_CA_BY_HOST = Map.of(
+			"appapi2.bankid.com", "bankid-ca/BankID_SSL_Root_CA_v1.pem",
+			"appapi2.test.bankid.com", "bankid-ca/Test_BankID_SSL_Root_CA_v1_Test.pem");
 
 	private KeyStore keyStore;
 	private KeyStore truststore;
@@ -42,20 +53,44 @@ public class BankidIdentityProviderConfig extends IdentityProviderModel {
 		getConfig().put(BANKID_APIURL_PROPERTY_NAME, apiUrl);
 	}
 
+	public String getKeyStoreBase64() {
+		return getConfig().get(BANKID_KEYSTORE_BASE64_PROPERTY_NAME);
+	}
+
 	public KeyStore getKeyStore() throws Exception {
 		if (keyStore == null) {
-			keyStore = KeystoreUtil.loadKeyStore(
-					getConfig().get(BANKID_KEYSTORE_FILE_PROPERTY_NAME),
-					getConfig().getOrDefault(BANKID_KEYSTORE_PASSWORD_PROPERTY_NAME, "changeit"));
+			String base64 = getKeyStoreBase64();
+			if (base64 == null || base64.isBlank()) {
+				throw new IllegalStateException(BANKID_KEYSTORE_BASE64_PROPERTY_NAME + " is not set");
+			}
+			// The MIME decoder skips line breaks, so wrapped base64 (or a trailing
+			// newline from `base64 file | gcloud secrets versions add`) still loads.
+			byte[] pkcs12 = Base64.getMimeDecoder().decode(base64);
+			KeyStore loaded = KeyStore.getInstance("PKCS12");
+			loaded.load(new ByteArrayInputStream(pkcs12),
+					getConfig().getOrDefault(BANKID_KEYSTORE_PASSWORD_PROPERTY_NAME, "changeit").toCharArray());
+			keyStore = loaded;
 		}
 		return keyStore;
 	}
 
 	public KeyStore getTrustStore() throws Exception {
 		if (truststore == null) {
-			truststore = KeystoreUtil.loadKeyStore(
-					getConfig().get(BANKID_TRUSTSTORE_FILE_PROPERTY_NAME),
-					getConfig().getOrDefault(BANKID_TRUSTSTORE_PASSWORD_PROPERTY_NAME, "changeit"));
+			String host = URI.create(getApiUrl()).getHost();
+			String resource = ROOT_CA_BY_HOST.get(host);
+			if (resource == null) {
+				throw new IllegalStateException("No BankID root CA for API host " + host
+						+ "; expected one of " + ROOT_CA_BY_HOST.keySet());
+			}
+			KeyStore loaded = KeyStore.getInstance(KeyStore.getDefaultType());
+			loaded.load(null, null);
+			try (InputStream pem = BankidIdentityProviderConfig.class.getClassLoader().getResourceAsStream(resource)) {
+				if (pem == null) {
+					throw new IOException("Missing bundled BankID root CA " + resource);
+				}
+				loaded.setCertificateEntry(host, CertificateFactory.getInstance("X.509").generateCertificate(pem));
+			}
+			truststore = loaded;
 		}
 		return truststore;
 	}
