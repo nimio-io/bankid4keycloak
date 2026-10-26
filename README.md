@@ -62,13 +62,15 @@ At the time of writing they are
 ### Keystore (base64)
 The PKCS12 keystore, base64 encoded. Line breaks are ignored.
 
-*example*: the output of `base64 -i keystore.p12`
+Keycloak returns this value, and the two passwords below, in clear text to anyone who can view identity providers or export the realm. Use [vault](https://www.keycloak.org/server/vault) references for all three, so the config holds only the reference, e.g. with `--vault=file` and a file `<realm>_bankid-client-cert` holding the output of `base64 -i keystore.p12`:
+
+*example*: `${vault.bankid-client-cert}`
 
 ### Keystore password
 
-Password for the PKCS12 container.
+Password for the PKCS12 container. Supports vault references.
 
-*example*: `qwerty123`
+*example*: `${vault.bankid-client-cert-passphrase}`
 
 ### Password for the private key
 

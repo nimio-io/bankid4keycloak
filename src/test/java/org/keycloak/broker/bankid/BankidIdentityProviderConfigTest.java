@@ -7,12 +7,21 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.security.KeyStore;
 import java.security.cert.X509Certificate;
 import java.util.Base64;
 import java.util.Collections;
+import java.util.Map;
+import java.util.Optional;
 
 import org.junit.jupiter.api.Test;
+import org.keycloak.vault.DefaultVaultRawSecret;
+import org.keycloak.vault.DefaultVaultTranscriber;
+import org.keycloak.vault.VaultProvider;
+import org.keycloak.vault.VaultRawSecret;
+import org.keycloak.vault.VaultTranscriber;
 
 class BankidIdentityProviderConfigTest {
 
@@ -26,14 +35,32 @@ class BankidIdentityProviderConfigTest {
 		}
 	}
 
+	private static VaultTranscriber vault(Map<String, String> entries) {
+		return new DefaultVaultTranscriber(new VaultProvider() {
+			@Override
+			public VaultRawSecret obtainSecret(String key) {
+				return DefaultVaultRawSecret.forBuffer(Optional.ofNullable(entries.get(key))
+						.map(value -> ByteBuffer.wrap(value.getBytes(StandardCharsets.UTF_8))));
+			}
+
+			@Override
+			public void close() {
+			}
+		});
+	}
+
+	// Configured the way Terraform does it: every secret is a vault reference.
 	private static BankidIdentityProviderConfig config(String apiUrl, String keystoreBase64) {
 		BankidIdentityProviderConfig config = new BankidIdentityProviderConfig();
 		config.setAlias("bankid");
 		config.setApiUrl(apiUrl);
-		if (keystoreBase64 != null) {
-			config.getConfig().put(BankidIdentityProviderConfig.BANKID_KEYSTORE_BASE64_PROPERTY_NAME, keystoreBase64);
-		}
-		config.getConfig().put(BankidIdentityProviderConfig.BANKID_KEYSTORE_PASSWORD_PROPERTY_NAME, "qwerty123");
+		config.getConfig().put(BankidIdentityProviderConfig.BANKID_KEYSTORE_BASE64_PROPERTY_NAME, "${vault.bankid-client-cert}");
+		config.getConfig().put(BankidIdentityProviderConfig.BANKID_KEYSTORE_PASSWORD_PROPERTY_NAME, "${vault.bankid-client-cert-passphrase}");
+		config.getConfig().put(BankidIdentityProviderConfig.BANKID_PRIVATEKEY_PASSWORD_PROPERTY_NAME, "${vault.bankid-client-cert-passphrase}");
+		Map<String, String> entries = keystoreBase64 == null
+				? Map.of("bankid-client-cert-passphrase", "qwerty123")
+				: Map.of("bankid-client-cert", keystoreBase64, "bankid-client-cert-passphrase", "qwerty123");
+		config.resolveSecrets(vault(entries));
 		return config;
 	}
 
@@ -51,22 +78,42 @@ class BankidIdentityProviderConfigTest {
 	}
 
 	@Test
+	void failsWhenTheVaultEntryIsMissing() {
+		assertThrows(IllegalStateException.class, () -> config(TEST_URL, null));
+	}
+
+	@Test
 	void failsWithoutAKeystore() {
-		assertThrows(IllegalStateException.class, () -> config(TEST_URL, null).getKeyStore());
+		BankidIdentityProviderConfig config = new BankidIdentityProviderConfig();
+		config.setApiUrl(TEST_URL);
+		config.resolveSecrets(vault(Map.of()));
+
+		assertThrows(IllegalStateException.class, config::getKeyStore);
+	}
+
+	@Test
+	void resolvesTheSecretsFromTheVault() throws Exception {
+		BankidIdentityProviderConfig config = config(TEST_URL, testKeystoreBase64());
+
+		assertEquals(testKeystoreBase64(), config.getKeyStoreBase64());
+		assertEquals("qwerty123", config.getPrivateKeyPassword());
+		// The IdP config itself keeps only the reference.
+		assertEquals("${vault.bankid-client-cert}",
+				config.getConfig().get(BankidIdentityProviderConfig.BANKID_KEYSTORE_BASE64_PROPERTY_NAME));
 	}
 
 	@Test
 	void truststoreHoldsTheRootForTheApiHost() throws Exception {
 		assertEquals("CN=BankID SSL Root CA v1,OU=Infrastructure CA,O=Finansiell ID-Teknik BID AB",
-				rootSubject(config(PROD_URL, null).getTrustStore(), "appapi2.bankid.com"));
+				rootSubject(config(PROD_URL, "unused").getTrustStore(), "appapi2.bankid.com"));
 		assertEquals("CN=Test BankID SSL Root CA v1 Test,OU=Infrastructure CA,O=Finansiell ID-Teknik BID AB",
-				rootSubject(config(TEST_URL, null).getTrustStore(), "appapi2.test.bankid.com"));
+				rootSubject(config(TEST_URL, "unused").getTrustStore(), "appapi2.test.bankid.com"));
 	}
 
 	@Test
 	void failsForAnUnknownApiHost() {
 		assertThrows(IllegalStateException.class,
-				() -> config("https://bankid.example.com", null).getTrustStore());
+				() -> config("https://bankid.example.com", "unused").getTrustStore());
 	}
 
 	@Test

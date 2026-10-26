@@ -10,6 +10,8 @@ import java.util.Base64;
 import java.util.Map;
 
 import org.keycloak.models.IdentityProviderModel;
+import org.keycloak.vault.VaultStringSecret;
+import org.keycloak.vault.VaultTranscriber;
 
 public class BankidIdentityProviderConfig extends IdentityProviderModel {
 	/**
@@ -34,6 +36,12 @@ public class BankidIdentityProviderConfig extends IdentityProviderModel {
 			"appapi2.bankid.com", "bankid-ca/BankID_SSL_Root_CA_v1.pem",
 			"appapi2.test.bankid.com", "bankid-ca/Test_BankID_SSL_Root_CA_v1_Test.pem");
 
+	// Resolved by resolveSecrets: the config holds ${vault.<key>} references so
+	// the keystore and its passwords never sit in the IdP representation.
+	private String keyStoreBase64;
+	private String keyStorePassword;
+	private String privateKeyPassword;
+
 	private KeyStore keyStore;
 	private KeyStore truststore;
 
@@ -53,25 +61,48 @@ public class BankidIdentityProviderConfig extends IdentityProviderModel {
 		getConfig().put(BANKID_APIURL_PROPERTY_NAME, apiUrl);
 	}
 
+	/**
+	 * Resolves the keystore and its passwords through the Keycloak vault. A
+	 * ${vault.<key>} value is read from the vault; a missing vault entry throws.
+	 */
+	public void resolveSecrets(VaultTranscriber vault) {
+		keyStoreBase64 = resolve(vault, BANKID_KEYSTORE_BASE64_PROPERTY_NAME, null);
+		keyStorePassword = resolve(vault, BANKID_KEYSTORE_PASSWORD_PROPERTY_NAME, "changeit");
+		privateKeyPassword = resolve(vault, BANKID_PRIVATEKEY_PASSWORD_PROPERTY_NAME, "changeit");
+	}
+
+	private String resolve(VaultTranscriber vault, String property, String defaultValue) {
+		String value = getConfig().get(property);
+		if (value == null || value.isBlank()) {
+			return defaultValue;
+		}
+		try (VaultStringSecret secret = vault.getStringSecret(value)) {
+			return secret.get().orElseThrow(() -> new IllegalStateException(
+					property + " references a vault entry that does not exist: " + value));
+		}
+	}
+
 	public String getKeyStoreBase64() {
-		return getConfig().get(BANKID_KEYSTORE_BASE64_PROPERTY_NAME);
+		return requireResolved(keyStoreBase64, BANKID_KEYSTORE_BASE64_PROPERTY_NAME);
 	}
 
 	public KeyStore getKeyStore() throws Exception {
 		if (keyStore == null) {
-			String base64 = getKeyStoreBase64();
-			if (base64 == null || base64.isBlank()) {
-				throw new IllegalStateException(BANKID_KEYSTORE_BASE64_PROPERTY_NAME + " is not set");
-			}
 			// The MIME decoder skips line breaks, so wrapped base64 (or a trailing
 			// newline from `base64 file | gcloud secrets versions add`) still loads.
-			byte[] pkcs12 = Base64.getMimeDecoder().decode(base64);
+			byte[] pkcs12 = Base64.getMimeDecoder().decode(getKeyStoreBase64());
 			KeyStore loaded = KeyStore.getInstance("PKCS12");
-			loaded.load(new ByteArrayInputStream(pkcs12),
-					getConfig().getOrDefault(BANKID_KEYSTORE_PASSWORD_PROPERTY_NAME, "changeit").toCharArray());
+			loaded.load(new ByteArrayInputStream(pkcs12), requireResolved(keyStorePassword, BANKID_KEYSTORE_PASSWORD_PROPERTY_NAME).toCharArray());
 			keyStore = loaded;
 		}
 		return keyStore;
+	}
+
+	private String requireResolved(String value, String property) {
+		if (value == null) {
+			throw new IllegalStateException(property + " is not set (or resolveSecrets was not called)");
+		}
+		return value;
 	}
 
 	public KeyStore getTrustStore() throws Exception {
@@ -96,7 +127,7 @@ public class BankidIdentityProviderConfig extends IdentityProviderModel {
 	}
 
 	public String getPrivateKeyPassword() {
-		return getConfig().getOrDefault(BANKID_PRIVATEKEY_PASSWORD_PROPERTY_NAME, "changeit");
+		return requireResolved(privateKeyPassword, BANKID_PRIVATEKEY_PASSWORD_PROPERTY_NAME);
 	}
 
 	public boolean isShowQRCode() {

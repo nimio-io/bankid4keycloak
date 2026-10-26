@@ -31,6 +31,7 @@ public class BankidIdentityProviderFactory extends AbstractIdentityProviderFacto
 	@Override
 	public BankidIdentityProvider create(KeycloakSession session, IdentityProviderModel model) {
 		BankidIdentityProviderConfig config = new BankidIdentityProviderConfig(model);
+		config.resolveSecrets(session.vault());
 		SimpleBankidClient client = CLIENTS.computeIfAbsent(clientKey(config),
 				key -> new SimpleBankidClient(buildBankidHttpClient(config), config.getApiUrl()));
 		return new BankidIdentityProvider(session, config, client);
@@ -52,7 +53,7 @@ public class BankidIdentityProviderFactory extends AbstractIdentityProviderFacto
 				.property().name(BankidIdentityProviderConfig.BANKID_APIURL_PROPERTY_NAME).label("BankID API base URL").helpText("The base URL for the BankID API. Without the trailing slash. Normally https://appapi2.bankid.com")
                 .type(ProviderConfigProperty.STRING_TYPE).add()
 
-				.property().name(BankidIdentityProviderConfig.BANKID_KEYSTORE_BASE64_PROPERTY_NAME).label("Keystore (base64)").helpText("The PKCS12 keystore that holds the client certificate, base64 encoded, i.e. the output of `base64 myfile.p12`")
+				.property().name(BankidIdentityProviderConfig.BANKID_KEYSTORE_BASE64_PROPERTY_NAME).label("Keystore (base64)").helpText("The PKCS12 keystore that holds the client certificate, base64 encoded. Use a vault reference, i.e. ${vault.bankid-client-cert}, so the keystore is not stored in the identity provider config.")
                 .type(ProviderConfigProperty.PASSWORD).add()
 				
 				.property().name(BankidIdentityProviderConfig.BANKID_KEYSTORE_PASSWORD_PROPERTY_NAME).label("Keystore password").helpText("The password for the keystore.")
@@ -89,8 +90,7 @@ public class BankidIdentityProviderFactory extends AbstractIdentityProviderFacto
 	static String clientKey(BankidIdentityProviderConfig config) {
 		String alias = config.getAlias() != null ? config.getAlias() : "";
 		String apiUrl = config.getApiUrl() != null ? config.getApiUrl() : "";
-		String keystore = config.getKeyStoreBase64() != null ? config.getKeyStoreBase64() : "";
-		return alias + "@" + apiUrl + "#" + sha256(keystore);
+		return alias + "@" + apiUrl + "#" + sha256(config.getKeyStoreBase64());
 	}
 
 	private static String sha256(String value) {
