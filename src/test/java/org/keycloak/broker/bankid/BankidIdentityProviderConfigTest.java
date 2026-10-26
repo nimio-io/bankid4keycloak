@@ -1,6 +1,7 @@
 package org.keycloak.broker.bankid;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -13,6 +14,7 @@ import java.security.KeyStore;
 import java.security.cert.X509Certificate;
 import java.util.Base64;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 
@@ -51,15 +53,23 @@ class BankidIdentityProviderConfigTest {
 
 	// Configured the way Terraform does it: every secret is a vault reference.
 	private static BankidIdentityProviderConfig config(String apiUrl, String keystoreBase64) {
+		return config(apiUrl, keystoreBase64, "qwerty123", "qwerty123");
+	}
+
+	private static BankidIdentityProviderConfig config(String apiUrl, String keystoreBase64, String keystorePassword,
+			String privateKeyPassword) {
 		BankidIdentityProviderConfig config = new BankidIdentityProviderConfig();
 		config.setAlias("bankid");
 		config.setApiUrl(apiUrl);
 		config.getConfig().put(BankidIdentityProviderConfig.BANKID_KEYSTORE_BASE64_PROPERTY_NAME, "${vault.bankid-client-cert}");
 		config.getConfig().put(BankidIdentityProviderConfig.BANKID_KEYSTORE_PASSWORD_PROPERTY_NAME, "${vault.bankid-client-cert-passphrase}");
-		config.getConfig().put(BankidIdentityProviderConfig.BANKID_PRIVATEKEY_PASSWORD_PROPERTY_NAME, "${vault.bankid-client-cert-passphrase}");
-		Map<String, String> entries = keystoreBase64 == null
-				? Map.of("bankid-client-cert-passphrase", "qwerty123")
-				: Map.of("bankid-client-cert", keystoreBase64, "bankid-client-cert-passphrase", "qwerty123");
+		config.getConfig().put(BankidIdentityProviderConfig.BANKID_PRIVATEKEY_PASSWORD_PROPERTY_NAME, "${vault.bankid-private-key-passphrase}");
+		Map<String, String> entries = new HashMap<>();
+		entries.put("bankid-client-cert-passphrase", keystorePassword);
+		entries.put("bankid-private-key-passphrase", privateKeyPassword);
+		if (keystoreBase64 != null) {
+			entries.put("bankid-client-cert", keystoreBase64);
+		}
 		config.resolveSecrets(vault(entries));
 		return config;
 	}
@@ -117,11 +127,14 @@ class BankidIdentityProviderConfigTest {
 	}
 
 	@Test
-	void clientKeyChangesWithTheKeystore() throws Exception {
+	void clientKeyChangesWithTheKeystoreAndPasswords() throws Exception {
 		String key = BankidIdentityProviderFactory.clientKey(config(PROD_URL, testKeystoreBase64()));
 
 		assertEquals(key, BankidIdentityProviderFactory.clientKey(config(PROD_URL, testKeystoreBase64())));
 		assertNotEquals(key, BankidIdentityProviderFactory.clientKey(config(PROD_URL, "cm90YXRlZA==")));
+		assertNotEquals(key, BankidIdentityProviderFactory.clientKey(config(PROD_URL, testKeystoreBase64(), "changed", "qwerty123")));
+		assertNotEquals(key, BankidIdentityProviderFactory.clientKey(config(PROD_URL, testKeystoreBase64(), "qwerty123", "changed")));
+		assertFalse(key.contains("qwerty123"));
 	}
 
 	private static String rootSubject(KeyStore trustStore, String alias) throws Exception {

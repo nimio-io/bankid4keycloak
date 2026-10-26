@@ -86,13 +86,17 @@ public class BankidIdentityProviderConfig extends IdentityProviderModel {
 		return requireResolved(keyStoreBase64, BANKID_KEYSTORE_BASE64_PROPERTY_NAME);
 	}
 
+	public String getKeyStorePassword() {
+		return requireResolved(keyStorePassword, BANKID_KEYSTORE_PASSWORD_PROPERTY_NAME);
+	}
+
 	public KeyStore getKeyStore() throws Exception {
 		if (keyStore == null) {
 			// The MIME decoder skips line breaks, so wrapped base64 (or a trailing
 			// newline from `base64 file | gcloud secrets versions add`) still loads.
 			byte[] pkcs12 = Base64.getMimeDecoder().decode(getKeyStoreBase64());
 			KeyStore loaded = KeyStore.getInstance("PKCS12");
-			loaded.load(new ByteArrayInputStream(pkcs12), requireResolved(keyStorePassword, BANKID_KEYSTORE_PASSWORD_PROPERTY_NAME).toCharArray());
+			loaded.load(new ByteArrayInputStream(pkcs12), getKeyStorePassword().toCharArray());
 			keyStore = loaded;
 		}
 		return keyStore;

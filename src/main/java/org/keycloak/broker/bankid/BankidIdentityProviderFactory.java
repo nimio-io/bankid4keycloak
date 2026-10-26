@@ -85,12 +85,15 @@ public class BankidIdentityProviderFactory extends AbstractIdentityProviderFacto
 			.build();
 	}
 
-	// The keystore is part of the key so a rotated client certificate gets a new
-	// HTTP client on the next request instead of after a restart.
+	// The keystore and its passwords are part of the key (hashed, never in
+	// clear) so a rotated certificate or a changed password builds a new HTTP
+	// client on the next request; a wrong new password then fails right away
+	// instead of hiding behind the cached client until a restart.
 	static String clientKey(BankidIdentityProviderConfig config) {
 		String alias = config.getAlias() != null ? config.getAlias() : "";
 		String apiUrl = config.getApiUrl() != null ? config.getApiUrl() : "";
-		return alias + "@" + apiUrl + "#" + sha256(config.getKeyStoreBase64());
+		return alias + "@" + apiUrl + "#" + sha256(String.join("\0",
+				config.getKeyStoreBase64(), config.getKeyStorePassword(), config.getPrivateKeyPassword()));
 	}
 
 	private static String sha256(String value) {
